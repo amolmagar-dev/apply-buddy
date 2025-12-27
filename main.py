@@ -14,7 +14,9 @@ def main():
         
         # Extract and save data
         jobs_data = glassdoor.extract_jobs_data(page, sb)
-        glassdoor.save_jobs_to_json(jobs_data, "glassdoor_jobs.json")
+        # we will start the application process for each job
+        for job in jobs_data:
+            glassdoor.apply_job(page, sb, job)  
         print(f"✅ Saved {len(jobs_data)} jobs")
 
 if __name__ == "__main__":

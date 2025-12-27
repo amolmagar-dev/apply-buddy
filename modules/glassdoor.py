@@ -168,3 +168,239 @@ def save_jobs_to_json(jobs, filename):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     print(f"📁 Saved to {filename}")
+
+def apply_job(page, sb, job):
+    """
+    Applies to a single job.
+    
+    Args:
+        page: The Playwright page object.
+        sb: The stealth browser object (or similar helper).
+        job: Dictionary containing job details (url, title, etc).
+    """
+    print(f"🚀 Starting application for: {job.get('title', 'Unknown Job')} at {job.get('company', 'Unknown Company')}")
+    
+    url = job.get("apply_link")
+    if not url:
+        print("❌ No apply link found for this job.")
+        return
+
+    try:
+        page.goto(url)
+        # using networkidle to ensure page is fully loaded (similar to networkidle2)
+        page.wait_for_load_state("networkidle")
+        sb.sleep(2) # Extra buffer
+        print("✅ Navigated to job page")
+        
+        # Click Easy Apply
+        # Selector provided: <button ... data-test="easyApply" ...>
+        # Use specific selector to avoid strict mode violation (header vs mobile nav)
+        apply_button = page.locator('[data-test="job-details-header"] [data-test="easyApply"]')
+        
+        # Fallback if header button not found (though unlikely on desktop view)
+        if apply_button.count() == 0:
+            apply_button = page.locator('button[data-test="easyApply"]').first
+        
+        if apply_button.is_visible():
+            print("👇 Clicking 'Easy Apply' button...")
+            
+            # Check if clicking opens a new page (common in job boards)
+            # We take a snapshot of pages before clicking
+            context = page.context
+            initial_pages = len(context.pages)
+            
+            apply_button.click()
+            sb.sleep(3) # Wait for potential redirect or new tab
+            
+            current_pages = context.pages
+            if len(current_pages) > initial_pages:
+                new_page = current_pages[-1]
+                handle_new_tab_application(new_page, sb)
+            else:
+                page.wait_for_load_state("networkidle")
+                print("✅ Clicked Easy Apply (same page redirect)")
+        else:
+            print("❌ 'Easy Apply' button not found (possibly already applied or different flow)")
+
+    except Exception as e:
+        print(f"❌ Failed to navigate or click: {e}")
+
+def handle_new_tab_application(new_page, sb):
+    """
+    Handles the application process when it opens in a new tab.
+    """
+    print("🔄 Handling new tab application...")
+    try:
+        new_page.wait_for_load_state("domcontentloaded")
+        new_page.wait_for_load_state("networkidle") # Wait for redirects to finish
+        sb.sleep(2)
+        
+        # Sometimes it stays on about:blank if we check too early
+        if new_page.url == "about:blank":
+             print("⚠️ URL is still about:blank, waiting longer...")
+             sb.sleep(3)
+        
+        print(f"✅ Application page ready: {new_page.url}")
+        
+        # Fill Address Details
+        print("✍️ Filling address details...")
+        
+        # Handle page by URL - loop until application complete
+        max_pages = 10
+        for _ in range(max_pages):
+            handle_current_page_by_url(new_page, sb)
+            sb.sleep(2)
+            
+            # Check if we're done (success page or closed)
+            if "/applied" in new_page.url or "/success" in new_page.url:
+                print("🎉 Application completed!")
+                break
+        
+    except Exception as e:
+        print(f"❌ Error in new tab: {e}")
+
+
+def handle_current_page_by_url(page, sb):
+    """Detects page type by URL path - 100% accurate"""
+    
+    current_url = page.url
+    print(f"🌐 Current URL: {current_url}")
+    
+    # URL → Page Type mapping
+    if "/resume-selection" in current_url:
+        print("📄 Resume selection page")
+        handle_indeed_resume(page, sb)
+        
+    elif "/resume-module/relevant-experience" in current_url:
+        print("💼 Relevant experience page")
+        handle_relevant_experience(page, sb)
+        
+    elif "/profile-location" in current_url:
+        print("📍 Location page")
+        handle_indeed_location(page, sb)
+        
+    elif "/questions" in current_url:
+        print("❓ Questions page")
+        handle_indeed_questions(page, sb)
+        
+    elif "/review" in current_url:
+        print("📋 Review & Submit page")
+        handle_review_submit(page, sb)
+        
+    else:
+        print("ℹ️ Unknown page - auto continue")
+        try:
+            page.get_by_test_id("continue-button").click()
+            sb.sleep(2)
+        except:
+            pass
+
+
+def handle_indeed_resume(page, sb):
+    """Handles Indeed SmartApply Resume page"""
+    
+    # Wait for resume page
+    page.wait_for_selector('#mosaic-provider-module-apply-resume-selection', timeout=10000)
+    print("📄 Indeed SmartApply Resume page")
+    
+    # Select EXISTING resume (already uploaded)
+    resume_card = page.get_by_test_id("resume-selection-file-resume-radio-card-label")
+    resume_card.scroll_into_view_if_needed()
+    resume_card.click()
+    print("✅ Selected existing resume")
+    
+    # Continue
+    page.get_by_test_id("continue-button").click()
+    print("➡️ Continued to next step")
+    sb.sleep(3)
+
+
+def handle_indeed_location(page, sb):
+    """Handles Indeed SmartApply Location page"""
+    
+    # Wait for location page
+    page.wait_for_selector('#mosaic-provider-module-apply-contact-info', timeout=10000)
+    print("📍 Indeed SmartApply Location page")
+    
+    # Fill ALL location fields
+    page.get_by_test_id("location-fields-postal-code-input").fill("411041")
+    print("✅ Postal code: 411041")
+    
+    page.get_by_test_id("location-fields-locality-input").fill("Pune, Maharashtra")
+    print("✅ City/State: Pune, Maharashtra")
+    
+    page.get_by_test_id("location-fields-address-input").fill("Pune, India, 411041")
+    print("✅ Address: Pune, India")
+    
+    # Continue
+    page.get_by_test_id("continue-button").click()
+    print("➡️ Continued")
+    sb.sleep(3)
+
+
+def handle_relevant_experience(page, sb):
+    """Handles Indeed SmartApply Relevant Experience page"""
+    
+    # Wait for relevant experience page
+    page.wait_for_selector('#mosaic-provider-module-apply-resume', timeout=10000)
+    print("💼 Indeed Relevant Experience page")
+    
+    # Fill from resume data
+    page.get_by_test_id("job-title-input").fill("SDE2")
+    print("✅ Job title: SDE2")
+    
+    page.get_by_test_id("company-name-input").fill("SMART SHIP HUB DIGITAL INDIA PVT")
+    print("✅ Company: SMART SHIP HUB DIGITAL INDIA PVT")
+    
+    # Continue
+    page.get_by_test_id("continue-button").click()
+    print("➡️ Continued")
+    sb.sleep(3)
+
+
+def handle_review_submit(page, sb):
+    """Handles Indeed SmartApply Review & Submit page"""
+    
+    print("✅ Review page - Final submission!")
+    
+    # Scroll to bottom first
+    page.mouse.wheel(0, 1000)
+    sb.sleep(1)
+    
+    # Multiple selectors for Submit button
+    submit_selectors = [
+        'button:has-text("Submit your application")',
+        '.css-140onwb:has-text("Submit your application")',
+        'button span:has-text("Submit your application")',
+        '[data-testid*="submit"]',
+        'button[type="submit"]'
+    ]
+    
+    for selector in submit_selectors:
+        try:
+            submit_btn = page.locator(selector).first
+            if submit_btn.is_visible(timeout=3000):
+                submit_btn.scroll_into_view_if_needed()
+                submit_btn.click()
+                print("🎉 SUBMITTED APPLICATION!")
+                sb.sleep(3)
+                return True
+        except:
+            continue
+    
+    print("⚠️ Submit button not found")
+    return False
+
+
+def handle_indeed_questions(page, sb):
+    """Handles Indeed SmartApply Questions page - STUB for now"""
+    
+    print("❓ Questions page detected - TODO: implement question handling")
+    
+    # For now, just click continue
+    try:
+        page.get_by_test_id("continue-button").click()
+        print("➡️ Skipped questions for now")
+        sb.sleep(3)
+    except:
+        print("⚠️ Could not continue from questions page")
