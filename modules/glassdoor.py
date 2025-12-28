@@ -3,7 +3,7 @@ from datetime import datetime
 
 def login(page, sb, email, password):
     """Logs into Glassdoor using the provided credentials."""
-    page.goto("https://www.glassdoor.co.in/index.htm")
+    page.goto("https://www.glassdoor.co.in/member/profile/login")
     page.wait_for_load_state("domcontentloaded")
     page.get_by_role("textbox", name="Enter email").fill(email)
     page.keyboard.press("Enter")
@@ -20,7 +20,7 @@ def search_jobs(page, sb, job_title, location):
     page.get_by_placeholder("Find your perfect job").fill(job_title)
     page.get_by_role("combobox", name="City, state, zipcode or \"remote\"").fill(location)
     page.keyboard.press("Enter")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
     sb.sleep(5)
     
     # SCROLL to load all jobs
@@ -210,7 +210,10 @@ def apply_job(page, sb, job):
             initial_pages = len(context.pages)
             
             apply_button.click()
-            sb.sleep(3) # Wait for potential redirect or new tab
+            # sb.sleep() # Wait for potential redirect or new tab , can we make it dynamic
+            page.wait_for_load_state("networkidle")
+            sb.sleep(2) # Extra buffer
+
             
             current_pages = context.pages
             if len(current_pages) > initial_pages:
@@ -238,6 +241,7 @@ def handle_new_tab_application(new_page, sb):
         # Sometimes it stays on about:blank if we check too early
         if new_page.url == "about:blank":
              print("⚠️ URL is still about:blank, waiting longer...")
+             new_page.wait_for_load_state("domcontentloaded")
              sb.sleep(3)
         
         print(f"✅ Application page ready: {new_page.url}")
@@ -246,15 +250,42 @@ def handle_new_tab_application(new_page, sb):
         print("✍️ Filling address details...")
         
         # Handle page by URL - loop until application complete
-        max_pages = 10
-        for _ in range(max_pages):
-            handle_current_page_by_url(new_page, sb)
-            sb.sleep(2)
-            
-            # Check if we're done (success page or closed)
-            if "/applied" in new_page.url or "/success" in new_page.url:
-                print("🎉 Application completed!")
+        max_pages = 15
+        last_url = ""
+        
+        for attempt in range(max_pages):
+            try:
+                # Check if tab is still open
+                if new_page.is_closed():
+                    print("⚠️ Tab was closed, moving to next job")
+                    break
+                    
+                current_url = new_page.url
+                print(f"🔍 Loop {attempt + 1}: URL = {current_url[:60]}...")
+                
+                # Check if we're done (success page)
+                if "/applied" in current_url or "/success" in current_url or "/post-apply" in current_url:
+                    print("🎉 Application completed!")
+                    break
+                
+                # Skip if URL hasn't changed (wait for navigation)
+                # if current_url == last_url:
+                #     print(f"   ⏳ Same URL, waiting...")
+                #     sb.sleep(1)
+                #     continueß
+                
+                print(f"📍 Processing: {current_url.split('/')[-1]}")
+                last_url = current_url
+                handle_current_page_by_url(new_page, sb)
+                
+                # Wait for URL to change after action
+                sb.sleep(3)
+                
+            except Exception as loop_error:
+                print(f"⚠️ Loop error at attempt {attempt + 1}: {loop_error}")
                 break
+        
+        print(f"🏁 Finished processing this job (loop ended)")
         
     except Exception as e:
         print(f"❌ Error in new tab: {e}")
@@ -262,6 +293,10 @@ def handle_new_tab_application(new_page, sb):
 
 def handle_current_page_by_url(page, sb):
     """Detects page type by URL path - 100% accurate"""
+    if page.url == "about:blank":
+        print("⚠️ URL is still about:blank, waiting longer...")
+        sb.sleep(3)
+        return  # Exit and let the loop retry
     
     current_url = page.url
     print(f"🌐 Current URL: {current_url}")
@@ -287,75 +322,120 @@ def handle_current_page_by_url(page, sb):
         print("📋 Review & Submit page")
         handle_review_submit(page, sb)
         
+    elif "/post-apply" in current_url:
+        print("🎉 POST-APPLY PAGE - Application submitted successfully!")
+        handle_post_apply(page, sb)
+        
     else:
         print("ℹ️ Unknown page - auto continue")
-        try:
-            page.get_by_test_id("continue-button").click()
-            sb.sleep(2)
-        except:
-            pass
+        pass
 
 
 def handle_indeed_resume(page, sb):
     """Handles Indeed SmartApply Resume page"""
     
-    # Wait for resume page
-    page.wait_for_selector('#mosaic-provider-module-apply-resume-selection', timeout=10000)
     print("📄 Indeed SmartApply Resume page")
+    sb.sleep(1)
     
-    # Select EXISTING resume (already uploaded)
-    resume_card = page.get_by_test_id("resume-selection-file-resume-radio-card-label")
-    resume_card.scroll_into_view_if_needed()
-    resume_card.click()
-    print("✅ Selected existing resume")
+    # Click the radio INPUT directly (not the label)
+    try:
+        radio_input = page.get_by_test_id("resume-selection-file-resume-radio-card-input")
+        radio_input.click(force=True)
+        print("✅ Selected existing resume (radio input)")
+    except:
+        # Fallback: click the label
+        resume_card = page.get_by_test_id("resume-selection-file-resume-radio-card-label")
+        resume_card.scroll_into_view_if_needed()
+        resume_card.click()
+        print("✅ Selected existing resume (label)")
     
-    # Continue
+    sb.sleep(1)
+    
+    # Continue - store URL to verify navigation
+    old_url = page.url
     page.get_by_test_id("continue-button").click()
-    print("➡️ Continued to next step")
-    sb.sleep(3)
+    print("➡️ Clicked continue")
+    
+    # Wait for URL to change
+    for _ in range(10):
+        sb.sleep(0.5)
+        if page.url != old_url:
+            print(f"✅ Navigated to: {page.url}")
+            break
 
 
 def handle_indeed_location(page, sb):
     """Handles Indeed SmartApply Location page"""
     
-    # Wait for location page
-    page.wait_for_selector('#mosaic-provider-module-apply-contact-info', timeout=10000)
     print("📍 Indeed SmartApply Location page")
+    sb.sleep(1)
     
-    # Fill ALL location fields
-    page.get_by_test_id("location-fields-postal-code-input").fill("411041")
-    print("✅ Postal code: 411041")
+    # Fill ALL location fields with try/except to handle missing fields
+    try:
+        page.get_by_test_id("location-fields-postal-code-input").fill("411041")
+        print("✅ Postal code: 411041")
+    except:
+        print("⚠️ Postal code field not found")
     
-    page.get_by_test_id("location-fields-locality-input").fill("Pune, Maharashtra")
-    print("✅ City/State: Pune, Maharashtra")
+    try:
+        page.get_by_test_id("location-fields-locality-input").fill("Pune, Maharashtra")
+        print("✅ City/State: Pune, Maharashtra")
+    except:
+        print("⚠️ City/State field not found")
     
-    page.get_by_test_id("location-fields-address-input").fill("Pune, India, 411041")
-    print("✅ Address: Pune, India")
+    try:
+        page.get_by_test_id("location-fields-address-input").fill("Pune, India, 411041")
+        print("✅ Address: Pune, India")
+    except:
+        print("⚠️ Address field not found")
     
-    # Continue
+    sb.sleep(1)
+    
+    # Continue - store URL to verify navigation
+    old_url = page.url
     page.get_by_test_id("continue-button").click()
-    print("➡️ Continued")
-    sb.sleep(3)
+    print("➡️ Clicked continue")
+    
+    # Wait for URL to change
+    for _ in range(10):
+        sb.sleep(0.5)
+        if page.url != old_url:
+            print(f"✅ Navigated to: {page.url}")
+            break
 
 
 def handle_relevant_experience(page, sb):
     """Handles Indeed SmartApply Relevant Experience page"""
     
-    # Wait for relevant experience page
-    page.wait_for_selector('#mosaic-provider-module-apply-resume', timeout=10000)
     print("💼 Indeed Relevant Experience page")
+    sb.sleep(1)
     
-    # Fill from resume data
-    page.get_by_test_id("job-title-input").fill("SDE2")
-    print("✅ Job title: SDE2")
+    # Fill from resume data with try/except
+    try:
+        page.get_by_test_id("job-title-input").fill("SDE2")
+        print("✅ Job title: SDE2")
+    except:
+        print("⚠️ Job title field not found")
     
-    page.get_by_test_id("company-name-input").fill("SMART SHIP HUB DIGITAL INDIA PVT")
-    print("✅ Company: SMART SHIP HUB DIGITAL INDIA PVT")
+    try:
+        page.get_by_test_id("company-name-input").fill("SMART SHIP HUB DIGITAL INDIA PVT")
+        print("✅ Company: SMART SHIP HUB DIGITAL INDIA PVT")
+    except:
+        print("⚠️ Company field not found")
     
-    # Continue
+    sb.sleep(1)
+    
+    # Continue - store URL to verify navigation
+    old_url = page.url
     page.get_by_test_id("continue-button").click()
-    print("➡️ Continued")
-    sb.sleep(3)
+    print("➡️ Clicked continue")
+    
+    # Wait for URL to change
+    for _ in range(10):
+        sb.sleep(0.5)
+        if page.url != old_url:
+            print(f"✅ Navigated to: {page.url}")
+            break
 
 
 def handle_review_submit(page, sb):
@@ -404,3 +484,17 @@ def handle_indeed_questions(page, sb):
         sb.sleep(3)
     except:
         print("⚠️ Could not continue from questions page")
+
+
+def handle_post_apply(page, sb):
+    """Handles Indeed SmartApply Post-Apply page - Job successfully applied!"""
+    
+    print("🎉🎉🎉 APPLICATION SUBMITTED SUCCESSFULLY! 🎉🎉🎉")
+    sb.sleep(2)
+    
+    # Close the tab since application is complete
+    try:
+        page.close()
+        print("✅ Closed application tab")
+    except:
+        pass
