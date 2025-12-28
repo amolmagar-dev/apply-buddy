@@ -102,7 +102,6 @@ def login(page, sb, email, password):
     except Exception as e:
         print(f"❌ Login failed: {e}")
 
-
 def search_jobs(page, sb, job_title, location):
     """Searches for jobs with the given title and location."""
     page.goto("https://www.glassdoor.co.in/Job/index.htm")
@@ -380,7 +379,6 @@ def handle_new_tab_application(new_page, sb):
     except Exception as e:
         print(f"❌ Error in new tab: {e}")
 
-
 def handle_current_page_by_url(page, sb):
     """Detects page type by URL path - 100% accurate"""
     if page.url == "about:blank":
@@ -420,7 +418,6 @@ def handle_current_page_by_url(page, sb):
         print("ℹ️ Unknown page - auto continue")
         pass
 
-
 def handle_indeed_resume(page, sb):
     """Handles Indeed SmartApply Resume page"""
     
@@ -452,7 +449,6 @@ def handle_indeed_resume(page, sb):
         if page.url != old_url:
             print(f"✅ Navigated to: {page.url}")
             break
-
 
 def handle_indeed_location(page, sb):
     """Handles Indeed SmartApply Location page"""
@@ -493,7 +489,6 @@ def handle_indeed_location(page, sb):
             print(f"✅ Navigated to: {page.url}")
             break
 
-
 def handle_relevant_experience(page, sb):
     """Handles Indeed SmartApply Relevant Experience page"""
     
@@ -526,7 +521,6 @@ def handle_relevant_experience(page, sb):
         if page.url != old_url:
             print(f"✅ Navigated to: {page.url}")
             break
-
 
 def handle_review_submit(page, sb):
     """Handles Indeed SmartApply Review & Submit page"""
@@ -561,7 +555,6 @@ def handle_review_submit(page, sb):
     print("⚠️ Submit button not found")
     return False
 
-
 def handle_indeed_questions(page, sb):
     """Handles Indeed SmartApply Questions page - STUB for now"""
     
@@ -574,7 +567,6 @@ def handle_indeed_questions(page, sb):
         sb.sleep(3)
     except:
         print("⚠️ Could not continue from questions page")
-
 
 def handle_post_apply(page, sb):
     """Handles Indeed SmartApply Post-Apply page - Job successfully applied!"""
