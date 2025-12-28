@@ -1,17 +1,107 @@
 import json
 from datetime import datetime
 
+import os
+import re
+
+def get_session_filename(email):
+    """Generates a safe session filename based on the email."""
+    # Username is the part before the @
+    username = email.split('@')[0]
+    # Sanitize just in case
+    safe_username = re.sub(r'[^a-zA-Z0-9_\-.]', '_', username)
+    return f".session/glassdoor/{safe_username}/session.json"
+
+def save_session(page, filename):
+    """Saves the browser context storage state to a file."""
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        
+        page.context.storage_state(path=filename)
+        print(f"💾 Session saved to {filename}")
+    except Exception as e:
+        print(f"⚠️ Failed to save session: {e}")
+
+def load_session(page, filename):
+    """Loads the session from the file if it exists."""
+    if os.path.exists(filename):
+        try:
+            # We need to reload cookies into the existing context
+            with open(filename, 'r') as f:
+                state = json.load(f)
+                if "cookies" in state:
+                    page.context.add_cookies(state["cookies"])
+                    print(f"📂 Loaded session from {filename}")
+                    return True
+        except Exception as e:
+            print(f"⚠️ Failed to load session: {e}")
+    return False
+
+def is_logged_in(page):
+    """Checks if the user is logged in by verifying specific elements."""
+    try:
+        # Check for profile icon or absence of sign-in button
+        # This selector depends on Glassdoor's specific DOM
+        page.goto("https://www.glassdoor.co.in/member/home/index.htm")
+        page.wait_for_load_state("domcontentloaded")
+        
+        # Check if redirected to login page
+        if "login" in page.url or "signin" in page.url:
+            return False
+            
+        return True
+    except:
+        return False
+
 def login(page, sb, email, password):
-    """Logs into Glassdoor using the provided credentials."""
+    """Logs into Glassdoor using session or credentials."""
+    session_file = get_session_filename(email)
+    
+    # 1. Try to load session
+    if load_session(page, session_file):
+        print("🔄 Verifying session...")
+        if is_logged_in(page):
+            print("✅ Session valid, skipping login")
+            return
+        else:
+            print("❌ Session expired or invalid")
+    
+    print("🔑 Logging in with credentials...")
     page.goto("https://www.glassdoor.co.in/member/profile/login")
     page.wait_for_load_state("domcontentloaded")
-    page.get_by_role("textbox", name="Enter email").fill(email)
-    page.keyboard.press("Enter")
-    page.wait_for_load_state("domcontentloaded")
-    page.get_by_role("textbox", name="Password").fill(password)
-    page.keyboard.press("Enter")
-    page.wait_for_load_state("domcontentloaded")
-    sb.sleep(3)
+    
+    # Check if already logged in (redirected)
+    if not ("login" in page.url or "signin" in page.url):
+         print("✅ Already logged in (url check)")
+         save_session(page, session_file)
+         return
+
+    try:
+        page.get_by_role("textbox", name="Enter email").fill(email)
+        page.keyboard.press("Enter")
+        page.wait_for_load_state("domcontentloaded")
+        
+        # Check for password field
+        try:
+             page.get_by_role("textbox", name="Password").fill(password)
+             page.keyboard.press("Enter")
+             page.wait_for_load_state("domcontentloaded")
+        except:
+             print("⚠️ Password field not found immediately, checking if email only was needed or captcha flow")
+        
+        sb.sleep(3)
+        
+        # Verify login success
+        if is_logged_in(page):
+            print("✅ Login successful")
+            save_session(page, session_file)
+        else:
+             print("⚠️ Login verification failed (might need manual check)")
+             
+    except Exception as e:
+        print(f"❌ Login failed: {e}")
+
 
 def search_jobs(page, sb, job_title, location):
     """Searches for jobs with the given title and location."""
